@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acelera Santo Antônio — Formatação de Avaliações</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 font-sans">
+
+    <header class="bg-blue-900 text-white shadow-md py-4 px-8 flex justify-between items-center">
+        <div class="flex items-center space-x-3 cursor-pointer" onclick="reiniciarInterface()">
+            <i class="fa-solid fa-file-pen text-2xl text-yellow-400"></i>
+            <h1 class="text-xl font-bold tracking-wide">Acelera Santo Antônio <span class="text-xs bg-blue-700 px-2 py-1 rounded-full text-blue-200">PAS/A</span></h1>
+        </div>
+        <span class="text-xs text-blue-200">Módulo Gráfica & Diagramação</span>
+    </header>
+
+    <main class="max-w-7xl mx-auto mt-6 p-4">
+        
+        <section id="uploadSection" class="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center max-w-2xl mx-auto">
+            <i class="fa-solid fa-cloud-arrow-up text-5xl text-blue-600 mb-4"></i>
+            <h2 class="text-2xl font-bold text-slate-800">Carregar Avaliação (.docx)</h2>
+            <p class="text-slate-500 text-sm mt-1 mb-6">Selecione o arquivo Word enviado pelo professor para processamento automático.</p>
+            
+            <div class="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-lg p-6 bg-slate-50 hover:bg-slate-100 transition cursor-pointer" onclick="document.getElementById('docxInput').click()">
+                <i class="fa-solid fa-file-word text-3xl text-blue-500 mb-2"></i>
+                <span id="fileNameDisplay" class="text-sm font-medium text-slate-700">Clique para selecionar o ficheiro .docx</span>
+                <input type="file" id="docxInput" accept=".docx" class="hidden" onchange="handleFileSelect(event)">
+            </div>
+
+            <button onclick="enviarDocx()" class="mt-6 w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition flex justify-center items-center gap-2">
+                <i class="fa-solid fa-gears"></i> Processar e Abrir Comparador
+            </button>
+        </section>
+
+        <div id="loading" class="hidden text-center py-12">
+            <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-blue-600 border-t-transparent"></div>
+            <p class="text-slate-600 font-medium mt-3">A extrair questões e a processar estrutura...</p>
+        </div>
+
+        <section id="previewSection" class="hidden flex flex-col gap-4">
+            
+            <div class="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <button onclick="reiniciarInterface()" class="text-sm text-slate-600 hover:text-blue-900 font-medium flex items-center gap-2">
+                    <i class="fa-solid fa-arrow-left"></i> Carregar Outro Ficheiro
+                </button>
+
+                <div class="flex items-center gap-4">
+                    <span id="totalQuestoes" class="text-xs bg-blue-100 text-blue-800 font-bold px-3 py-1.5 rounded-full">0 Questões Extraídas</span>
+                    <button onclick="gerarDOCX()" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-2.5 rounded-lg transition flex justify-center items-center gap-2 shadow-sm text-sm">
+                        <i class="fa-solid fa-file-word"></i> Gerar .DOCX Formatado
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[75vh]">
+                    <div class="flex justify-between items-center mb-3 pb-2 border-b">
+                        <h3 class="font-bold text-slate-700 text-sm uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-file-word text-blue-600"></i> Documento Original (Professor)
+                        </h3>
+                        <span class="text-xs text-slate-400">Apenas Leitura</span>
+                    </div>
+                    <div id="originalDocContainer" class="flex-1 overflow-y-auto p-4 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-2 font-serif"></div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[75vh]">
+                    <div class="flex justify-between items-center mb-3 pb-2 border-b">
+                        <h3 class="font-bold text-slate-700 text-sm uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-pen-to-square text-green-600"></i> Editor Acelera (Editável)
+                        </h3>
+                        <span class="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded font-semibold">Clique no texto para editar</span>
+                    </div>
+
+                    <div id="questoesContainer" class="flex-1 overflow-y-auto space-y-4 pr-2"></div>
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+    <script>
+        let provaData = null;
+        let arquivoOriginal = null;
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                arquivoOriginal = file;
+                document.getElementById('fileNameDisplay').textContent = file.name;
+            }
+        }
+
+        function reiniciarInterface() {
+            provaData = null;
+            arquivoOriginal = null;
+            document.getElementById('docxInput').value = '';
+            document.getElementById('fileNameDisplay').textContent = 'Clique para selecionar o ficheiro .docx';
+            document.getElementById('previewSection').classList.add('hidden');
+            document.getElementById('uploadSection').classList.remove('hidden');
+        }
+
+        async function enviarDocx() {
+            const fileInput = document.getElementById('docxInput');
+            if (!fileInput.files[0]) {
+                alert('Por favor, selecione um ficheiro .docx primeiro.');
+                return;
+            }
+
+            arquivoOriginal = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', arquivoOriginal);
+
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('loading').classList.remove('hidden');
+
+            try {
+                renderizarWordOriginal(arquivoOriginal);
+
+                const response = await fetch('/api/v1/uploads/processar-docx', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error('Falha ao processar documento');
+
+                provaData = await response.json();
+                renderizarQuestoesEditaveis();
+
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('previewSection').classList.remove('hidden');
+            } catch (error) {
+                alert('Erro ao processar arquivo: ' + error.message);
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('uploadSection').classList.remove('hidden');
+            }
+        }
+
+        function renderizarWordOriginal(file) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const arrayBuffer = event.target.result;
+                mammoth.convertToHtml({ arrayBuffer: arrayBuffer })
+                    .then(function(result) {
+                        document.getElementById('originalDocContainer').innerHTML = result.value;
+                    })
+                    .catch(function(err) {
+                        document.getElementById('originalDocContainer').innerHTML = 
+                            '<p class="text-red-500">Não foi possível carregar a pré-visualização do documento original.</p>';
+                    });
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function renderizarQuestoesEditaveis() {
+            const container = document.getElementById('questoesContainer');
+            container.innerHTML = '';
+
+            document.getElementById('totalQuestoes').textContent = `${provaData.questoes.length} Questões Extraídas`;
+
+            provaData.questoes.forEach((q, qIndex) => {
+                const qDiv = document.createElement('div');
+                qDiv.className = 'border border-slate-200 rounded-lg p-4 bg-slate-50 hover:bg-white transition shadow-sm';
+                
+                let altsHtml = q.alternativas.map((alt, aIndex) => 
+                    `<li class="text-xs text-slate-700 flex items-start gap-1">
+                        <strong class="text-blue-900 font-bold">(${alt.letra})</strong> 
+                        <span contenteditable="true" onblur="atualizarAlternativa(${qIndex}, ${aIndex}, this.innerText)" class="flex-1 outline-none focus:bg-yellow-50 focus:p-0.5 rounded">${alt.texto}</span>
+                    </li>`
+                ).join('');
+
+                qDiv.innerHTML = `
+                    <div class="font-bold text-sm text-slate-800 mb-1">Questão ${q.numero}</div>
+                    <p contenteditable="true" onblur="atualizarEnunciado(${qIndex}, this.innerText)" class="text-xs text-slate-700 mb-3 whitespace-pre-line outline-none focus:bg-yellow-50 focus:p-1 rounded">${q.enunciado}</p>
+                    <ul class="space-y-1 pl-2 border-l-2 border-blue-500">${altsHtml}</ul>
+                `;
+                container.appendChild(qDiv);
+            });
+        }
+
+        function atualizarEnunciado(qIndex, novoTexto) {
+            provaData.questoes[qIndex].enunciado = novoTexto.trim();
+        }
+
+        function atualizarAlternativa(qIndex, aIndex, novoTexto) {
+            provaData.questoes[qIndex].alternativas[aIndex].texto = novoTexto.trim();
+        }
+
+        async function gerarDOCX() {
+            if (!provaData) return;
+
+            let nomeOriginal = "avaliacao";
+            if (arquivoOriginal && arquivoOriginal.name) {
+                nomeOriginal = arquivoOriginal.name.replace(/\.docx$/i, "");
+            }
+
+            try {
+                const response = await fetch('/api/v1/pdf/gerar-docx-formatado', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ...provaData,
+                        nome_arquivo_original: nomeOriginal
+                    })
+                });
+
+                if (!response.ok) throw new Error('Erro ao gerar documento .docx');
+
+                const result = await response.json();
+                window.location.href = result.download_url;
+
+            } catch (error) {
+                alert('Erro ao gerar .docx: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>
