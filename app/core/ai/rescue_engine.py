@@ -16,12 +16,14 @@ class AIRescueEngine:
 
         prompt = f"""
         Você é um assistente especializado em diagramação e estruturação de provas escolares.
-        Abaixo está o texto extraído de um documento Word enviado por um professor. Esse documento pode conter tabelas desalinhadas, quebras de linha forçadas ou falta de numeração explícita.
+        Abaixo está o texto extraído de um documento Word enviado por um professor.
 
         Sua missão:
-        1. Identificar todas as questões, construindo seus respectivos enunciados e alternativas (A, B, C, D, E).
-        2. Corrigir erros de digitação óbvios no texto das questões/alternativas se necessário.
-        3. Ignorar cabeçalhos de escola, instruções de preenchimento de cartão e avisos genéricos.
+        1. Identificar todas as questões do texto (sejam objetivas de múltipla escolha ou discursivas/abertas).
+        2. Para questões objetivas, extraia o enunciado e a lista de alternativas (A, B, C, D, E).
+        3. Para questões discursivas/abertas (que não possuem alternativas), extraia o enunciado completo e deixe a lista de alternativas vazia ([]).
+        4. Manter a numeração sequencial correta das questões.
+        5. Ignorar cabeçalhos de escola, campos de nome de estudante, data, turma e avisos genéricos.
 
         Texto da Prova:
         ---
@@ -31,7 +33,7 @@ class AIRescueEngine:
 
         try:
             response = self.client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-1.5-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
