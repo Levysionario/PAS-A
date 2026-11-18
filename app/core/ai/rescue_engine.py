@@ -11,49 +11,42 @@ class AIRescueEngine:
 
     def estruturar_prova_com_ia(self, texto_bruto_prova: str) -> ProvaSchema:
         if not self.client:
-            print("[AI-Rescue] API Key não configurada no ambiente (GEMINI_API_KEY).")
-            return ProvaSchema(titulo="Avaliação do Colégio Santo Antônio", questoes=[])
+            print("[AI-Rescue] GEMINI_API_KEY não configurada no servidor.")
+            return ProvaSchema(questoes=[])
 
         prompt = f"""
-        Você é um Extrator e Estruturador Estrito de Provas do Colégio Santo Antônio.
-        Sua única função é extrair e organizar o conteúdo de um documento Word (.docx) enviado por um professor para a estrutura JSON definida.
+        Você é um extrator estrutural estrito de provas do Colégio Santo Antônio.
+        Sua única tarefa é separar o texto abaixo em metadados, questões e alternativas no formato JSON.
 
-        REGRA DE OURO IMPRESCINDÍVEL:
-        - REGRA DE FIDELIDADE ZERO ALTERAÇÃO: Você NUNCA deve alterar, resumir, reescrever, corrigir, adicionar ou remover qualquer palavra, frase ou pontuação do texto original da prova. Transcreva o enunciado e as alternativas EXATAMENTE como foram escritos pelo professor.
+        REGRAS ABSOLUTAS E INVIOLÁVEIS:
+        1. FIDELIDADE 1:1 ABSOLUTA: NUNCA escreva, invente, resuma, remova ou sequer corrija erros de digitação, ortografia ou pontuação da prova original. Transcreva os enunciados e alternativas ESTRITAMENTE IGUAIS ao original.
+        2. SEM MARCADORES AUTOMÁTICOS: Se houver tópicos ou listas dentro do enunciado, mantenha o caractere literal original (ex: "· ") como texto simples. NUNCA converta para markdown (* ou -).
+        3. ALTERNATIVAS SEMPRE EM MINÚSCULO: As letras das alternativas devem ser SEMPRE minúsculas ("a", "b", "c", "d", "e"), mesmo que no original estejam em maiúsculo.
+        4. QUESTÕES DISCURSIVAS/ABERTAS: Se a questão não tiver alternativas, retorne "alternativas": [].
+        5. METADADOS: Extraia disciplina, professor, turma e tipo_avaliacao (valores válidos: "mensal", "bimestral", "acn", "atividade", "diagnostica", "extra", "final", "guia", "ta", "td") se constarem no topo do arquivo. Caso não constem, use os valores padrão.
 
-        REGRAS DE ESTRUTURAÇÃO DO COLÉGIO SANTO ANTÔNIO:
-        1. IGNORAR CABEÇALHOS E LIXO DE PÁGINA: Ignore campos de identificação como "Aluno (a):", "Professor:", "DATA:", "NOTA:", títulos como "Avaliação Mensal", "Atividade" e tabelas de gabarito/bolhas de resposta.
-        2. IDENTIFICAÇÃO DE QUESTÕES:
-           - Localize os identificadores de questão (ex.: "Questão 1", "Questão 2.", "1-", "2-").
-           - Mantenha a numeração original da questão no campo 'numero'.
-        3. QUESTÕES OBJETIVAS (MÚLTIPLA ESCOLHA):
-           - Se a questão possui opções (sejam 3, 4 ou 5 alternativas precedidas por a), b), c), d), e) ou A), B), C)...), cada opção deve ser mapeada individualmente na lista 'alternativas' com a 'letra' e o 'texto' EXATO da alternativa.
-        4. QUESTÕES DISCURSIVAS / ABERTAS / PRODUÇÃO TEXTUAL:
-           - Se a questão for de resposta escrita, cálculos ou redação (sem opções de a/b/c/d/e), coloque todo o comando/orientações no campo 'enunciado' e deixe a lista 'alternativas' estritamente vazia ([]).
-        5. TEXTOS DE APOIO / CONTEXTUALIZADORES:
-           - Se houver um texto motivador antes das questões (ex.: "Texto para as questões de 2 a 11: ..."), inclua o texto motivador integralmente no início do 'enunciado' da primeira questão do bloco correspondente.
-
-        FORMATO DE SAÍDA EXIGIDO (JSON Estrito sem marcadores adicionais):
+        Retorne EXATAMENTE um JSON neste formato:
         {{
-            "titulo": "Avaliação do Colégio Santo Antônio",
+            "tipo_avaliacao": "mensal",
+            "disciplina": "FÍSICA",
+            "professor": "NOME DO PROFESSOR",
+            "turma": "1º Ano",
+            "bimestre": "4º Bimestre",
+            "chamada": "1ª Chamada",
+            "is_adaptada": false,
             "questoes": [
                 {{
                     "numero": 1,
-                    "enunciado": "Texto integral da pergunta 1...",
+                    "enunciado": "Texto exatamente igual ao original",
                     "alternativas": [
-                        {{"letra": "a", "texto": "Texto exato da alternativa A"}},
-                        {{"letra": "b", "texto": "Texto exato da alternativa B"}}
+                        {{"letra": "a", "texto": "texto exatamente igual ao original"}},
+                        {{"letra": "b", "texto": "texto exatamente igual ao original"}}
                     ]
-                }},
-                {{
-                    "numero": 2,
-                    "enunciado": "Explique com suas palavras o conceito de seleção natural...",
-                    "alternativas": []
                 }}
             ]
         }}
 
-        TEXTO DA PROVA PARA EXTRAÇÃO:
+        Texto original:
         ---
         {texto_bruto_prova}
         ---
@@ -61,11 +54,11 @@ class AIRescueEngine:
 
         try:
             response = self.client.models.generate_content(
-                model='gemini-1.5-flash',
+                model="gemini-1.5-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    temperature=0.0
+                    temperature=0.0,
                 ),
             )
 
@@ -83,7 +76,7 @@ class AIRescueEngine:
                 alts = [
                     AlternativaSchema(
                         letra=str(alt.get("letra", "")).strip().lower().replace(")", "").replace(".", ""),
-                        texto=str(alt.get("texto", "")).strip()
+                        texto=str(alt.get("texto", "")).strip(),
                     )
                     for alt in item.get("alternativas", [])
                 ]
@@ -91,13 +84,21 @@ class AIRescueEngine:
                     QuestaoSchema(
                         numero=item.get("numero", len(questoes_convertidas) + 1),
                         enunciado=str(item.get("enunciado", "")).strip(),
-                        alternativas=alts
+                        alternativas=alts,
                     )
                 )
 
-            titulo = dados.get("titulo", "Avaliação do Colégio Santo Antônio")
-            return ProvaSchema(titulo=titulo, questoes=questoes_convertidas)
+            return ProvaSchema(
+                tipo_avaliacao=str(dados.get("tipo_avaliacao", "mensal")).strip().lower(),
+                disciplina=str(dados.get("disciplina", "DISCIPLINA")).strip().upper(),
+                professor=str(dados.get("professor", "PROFESSOR")).strip(),
+                turma=str(dados.get("turma", "1º Ano")).strip(),
+                bimestre=str(dados.get("bimestre", "4º Bimestre")).strip(),
+                chamada=str(dados.get("chamada", "1ª Chamada")).strip(),
+                is_adaptada=bool(dados.get("is_adaptada", False)),
+                questoes=questoes_convertidas,
+            )
 
         except Exception as e:
-            print(f"[AI-Rescue] Erro durante o processamento da IA: {e}")
-            return ProvaSchema(titulo="Avaliação do Colégio Santo Antônio", questoes=[])
+            print(f"[AI-Rescue] Erro ao processar resposta do Gemini: {e}")
+            return ProvaSchema(questoes=[])
