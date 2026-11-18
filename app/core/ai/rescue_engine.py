@@ -8,10 +8,13 @@ class AIRescueEngine:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+        self.ultimo_erro: str | None = None
 
     def estruturar_prova_com_ia(self, texto_bruto_prova: str) -> ProvaSchema:
+        self.ultimo_erro = None
         if not self.client:
-            print("[AI-Rescue] GEMINI_API_KEY não configurada no servidor.")
+            self.ultimo_erro = "GEMINI_API_KEY não configurada no servidor."
+            print(f"[AI-Rescue] {self.ultimo_erro}")
             return ProvaSchema(questoes=[])
 
         prompt = f"""
@@ -54,7 +57,7 @@ class AIRescueEngine:
 
         try:
             response = self.client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.5-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -100,5 +103,6 @@ class AIRescueEngine:
             )
 
         except Exception as e:
+            self.ultimo_erro = str(e)
             print(f"[AI-Rescue] Erro ao processar resposta do Gemini: {e}")
             return ProvaSchema(questoes=[])

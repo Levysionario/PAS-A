@@ -67,6 +67,7 @@ async def refazer_com_ia(filename: str = Form(...)):
     prova_resgatada = ai_engine.estruturar_prova_com_ia(texto_completo)
 
     if len(prova_resgatada.questoes) == 0:
-        raise HTTPException(status_code=422, detail="A IA não conseguiu estruturar as questões deste arquivo.")
+        motivo = ai_engine.ultimo_erro or "A IA não conseguiu estruturar as questões deste arquivo."
+        raise HTTPException(status_code=422, detail=motivo)
 
     return prova_resgatada
