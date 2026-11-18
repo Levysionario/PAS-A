@@ -5,7 +5,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls, qn
-from app.schemas.prova import ProvaSchema
+from app.schemas.prova import ProvaSchema, TabelaQuestaoSchema
 
 MAPA_BANNERS = {
     "acn": "assets/cabecalhos/ACN.png",
@@ -32,7 +32,7 @@ TIPOS_OFICIAIS_COM_NOTA = {
 
 
 def _aplicar_fonte_padrao(run, negrito: bool = False, tamanho: int = 12, cor_rgb: tuple = (0, 0, 0)):
-    """Força Arial Narrow, tamanho e cor explícita (preto por padrão, evitando vazamento de gabarito em vermelho)."""
+    """Força Arial Narrow, tamanho e cor explícita (preto por padrão, anulando gabaritos em vermelho)."""
     run.font.name = "Arial Narrow"
     run.font.size = Pt(tamanho)
     run.bold = negrito
@@ -75,18 +75,20 @@ def _aplicar_fundo_vermelho_paragrafo(paragrafo, cor_hex: str = "FF3333"):
     pPr.append(shd)
 
 
-def _configurar_bordas_tabela(table, borda_externa: bool = False):
+def _configurar_bordas_tabela(table, borda_externa: bool = False, bordas_internas: bool = False):
     tblPr = table._tbl.tblPr
-    val = "single" if borda_externa else "none"
-    sz = "12" if borda_externa else "0"
+    val_ext = "single" if borda_externa else "none"
+    sz_ext = "8" if borda_externa else "0"
+    val_int = "single" if bordas_internas else "none"
+    sz_int = "6" if bordas_internas else "0"
     borders = parse_xml(
         f'<w:tblBorders {nsdecls("w")}>'
-        f'<w:top w:val="{val}" w:sz="{sz}" w:space="0" w:color="000000"/>'
-        f'<w:left w:val="{val}" w:sz="{sz}" w:space="0" w:color="000000"/>'
-        f'<w:bottom w:val="{val}" w:sz="{sz}" w:space="0" w:color="000000"/>'
-        f'<w:right w:val="{val}" w:sz="{sz}" w:space="0" w:color="000000"/>'
-        f'<w:insideH w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
-        f'<w:insideV w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        f'<w:top w:val="{val_ext}" w:sz="{sz_ext}" w:space="0" w:color="000000"/>'
+        f'<w:left w:val="{val_ext}" w:sz="{sz_ext}" w:space="0" w:color="000000"/>'
+        f'<w:bottom w:val="{val_ext}" w:sz="{sz_ext}" w:space="0" w:color="000000"/>'
+        f'<w:right w:val="{val_ext}" w:sz="{sz_ext}" w:space="0" w:color="000000"/>'
+        f'<w:insideH w:val="{val_int}" w:sz="{sz_int}" w:space="0" w:color="000000"/>'
+        f'<w:insideV w:val="{val_int}" w:sz="{sz_int}" w:space="0" w:color="000000"/>'
         f"</w:tblBorders>"
     )
     tblPr.append(borders)
@@ -114,7 +116,7 @@ def _inserir_cartao_resposta(doc: Document, total_questoes_objetivas: int):
 
     table = doc.add_table(rows=linhas_por_col, cols=colunas)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _configurar_bordas_tabela(table, borda_externa=False)
+    _configurar_bordas_tabela(table, borda_externa=False, bordas_internas=False)
 
     for idx in range(total_questoes_objetivas):
         col_idx = idx // linhas_por_col
@@ -130,7 +132,35 @@ def _inserir_cartao_resposta(doc: Document, total_questoes_objetivas: int):
         _aplicar_fonte_padrao(run, negrito=True, tamanho=11, cor_rgb=(0, 0, 0))
 
 
-def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
+def _inserir_tabela_questao(doc: Document, tabela_schema: TabelaQuestaoSchema):
+    """Reconstrói uma tabela real do Word dentro da questão em Arial Narrow 11 preto."""
+    if not tabela_schema or not tabela_schema.linhas:
+        return
+
+    num_linhas = len(tabela_schema.linhas)
+    num_cols = max(len(l) for l in tabela_schema.linhas)
+    if num_cols <= 0:
+        return
+
+    table = doc.add_table(rows=num_linhas, cols=num_cols)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _configurar_bordas_tabela(table, borda_externa=True, bordas_internas=True)
+
+    for r_idx, linha in enumerate(tabela_schema.linhas):
+        for c_idx in range(num_cols):
+            texto_cel = linha[c_idx] if c_idx < len(linha) else ""
+            cell = table.cell(r_idx, c_idx)
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            p = cell.paragraphs[0]
+            _garantir_paragrafo_sem_marcador(p)
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.space_before = Pt(2)
+            p.paragraph_format.space_after = Pt(2)
+            run = p.add_run(texto_cel)
+            _aplicar_fonte_padrao(run, negrito=(r_idx == 0), tamanho=11, cor_rgb=(0, 0, 0))
+
+
+def gerar_documento_oficial(prova: ProvaSchema, output_path: str, tipo_cabecalho: str | None = None) -> str:
     doc = Document()
 
     for section in doc.sections:
@@ -141,7 +171,8 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
         section.left_margin = Cm(1.2)
         section.right_margin = Cm(1.2)
 
-    tipo_chave = (prova.tipo_avaliacao or "mensal").strip().lower()
+    tipo_bruto = prova.tipo_avaliacao or tipo_cabecalho or "mensal"
+    tipo_chave = tipo_bruto.strip().lower()
     eh_prova_oficial = tipo_chave in TIPOS_OFICIAIS_COM_NOTA
 
     # 1. Banner Institucional Oficial
@@ -178,7 +209,7 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
     cols_cabecalho = 2 if eh_prova_oficial else 1
     tabela_cab = doc.add_table(rows=1, cols=cols_cabecalho)
     tabela_cab.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _configurar_bordas_tabela(tabela_cab, borda_externa=False)
+    _configurar_bordas_tabela(tabela_cab, borda_externa=False, bordas_internas=False)
 
     cell_dados = tabela_cab.cell(0, 0)
     cell_dados.width = Cm(15.8 if eh_prova_oficial else 18.6)
@@ -230,7 +261,7 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
         qtd_objetivas = sum(1 for q in prova.questoes if len(q.alternativas) > 0)
         _inserir_cartao_resposta(doc, qtd_objetivas)
 
-    # 5. Corpo das Questões (Sempre preto absoluto #000000, 1 linha em branco, Questão X isolado em negrito, a) b) c) minúsculo)
+    # 5. Corpo das Questões
     for q in prova.questoes:
         # Exatamente 1 linha em branco antes de cada "Questão X"
         p_vazio = doc.add_paragraph()
@@ -249,7 +280,7 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
         p_q_titulo.paragraph_format.keep_with_next = True
         _aplicar_fonte_padrao(p_q_titulo.add_run(f"Questão {q.numero}"), negrito=True, tamanho=12, cor_rgb=(0, 0, 0))
 
-        # Enunciado limpo (remove linhas vazias duplicadas internas e força preto #000000)
+        # Enunciado limpo (remove linhas vazias duplicadas e força preto #000000)
         linhas_enunciado = [l.strip() for l in q.enunciado.split("\n") if l.strip()]
         for linha in linhas_enunciado:
             p_enunc = doc.add_paragraph()
@@ -258,6 +289,10 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
             p_enunc.paragraph_format.space_after = Pt(0)
             p_enunc.paragraph_format.line_spacing = 1.15
             _aplicar_fonte_padrao(p_enunc.add_run(linha), negrito=False, tamanho=12, cor_rgb=(0, 0, 0))
+
+        # Tabela interna da questão (se houver)
+        if q.tabela:
+            _inserir_tabela_questao(doc, q.tabela)
 
         # Alternativas sempre em minúsculo (a), b), c)...), sem marcador automático e sempre em preto
         for alt in q.alternativas:
@@ -269,19 +304,28 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
             p_alt.paragraph_format.line_spacing = 1.15
             _aplicar_fonte_padrao(p_alt.add_run(f"{letra_min}) {alt.texto}"), negrito=False, tamanho=12, cor_rgb=(0, 0, 0))
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    pasta_saida = os.path.dirname(output_path)
+    if pasta_saida:
+        os.makedirs(pasta_saida, exist_ok=True)
     doc.save(output_path)
     return output_path
 
 
 class ProvaDocxBuilder:
-    def __init__(self, prova: ProvaSchema = None):
+    def __init__(
+        self,
+        prova: ProvaSchema = None,
+        output_path: str = None,
+        tipo_cabecalho: str = "mensal",
+    ):
         self.prova = prova
+        self.output_path = output_path
+        self.tipo_cabecalho = tipo_cabecalho
 
-    def build(self, output_path: str, prova: ProvaSchema = None) -> str:
+    def build(self, output_path: str = None, prova: ProvaSchema = None) -> str:
         alvo = prova or self.prova
-        return gerar_documento_oficial(alvo, output_path)
+        destino = output_path or self.output_path
+        return gerar_documento_oficial(alvo, destino, tipo_cabecalho=self.tipo_cabecalho)
 
-    def gerar(self, output_path: str, prova: ProvaSchema = None) -> str:
-        alvo = prova or self.prova
-        return gerar_documento_oficial(alvo, output_path)
+    def gerar(self, output_path: str = None, prova: ProvaSchema = None) -> str:
+        return self.build(output_path=output_path, prova=prova)
