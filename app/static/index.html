@@ -44,17 +44,17 @@
 
         <section id="previewSection" class="hidden flex flex-col gap-4">
             
-            <div class="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <!-- Barra Superior de Ações -->
+            <div class="flex flex-wrap justify-between items-center gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                 <button onclick="reiniciarInterface()" class="text-sm text-slate-600 hover:text-blue-900 font-medium flex items-center gap-2">
                     <i class="fa-solid fa-arrow-left"></i> Carregar Outro Ficheiro
                 </button>
 
-                <div class="flex items-center gap-3">
+                <div class="flex flex-wrap items-center gap-3">
                     <span id="totalQuestoes" class="text-xs bg-blue-100 text-blue-800 font-bold px-3 py-1.5 rounded-full">0 Questões Extraídas</span>
                     
-                    <!-- Botão de Resgate por IA Manual -->
                     <button id="btnRefazerIA" onclick="chamarRefazerComIA()" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold px-4 py-2.5 rounded-lg transition flex justify-center items-center gap-2 shadow-sm text-sm">
-                        <i class="fa-solid fa-wand-magic-sparkles text-yellow-300"></i> ✨ Refazer com IA
+                        <i class="fa-solid fa-wand-magic-sparkles text-yellow-300"></i> Refazer com IA
                     </button>
 
                     <button onclick="gerarDOCX()" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-2.5 rounded-lg transition flex justify-center items-center gap-2 shadow-sm text-sm">
@@ -63,9 +63,122 @@
                 </div>
             </div>
 
+            <!-- Painel de Controle Manual da Gráfica (Banner, Cabeçalho e Gabarito) -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                <div class="flex flex-wrap justify-between items-center gap-2 pb-3 mb-4 border-b border-slate-200">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-blue-700"></i>
+                        <h3 class="font-bold text-slate-800 text-sm uppercase tracking-wider">Painel de Controle da Gráfica — Cabeçalho, Banner e Gabarito</h3>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-4 text-xs font-semibold">
+                        <label class="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                            <input type="checkbox" id="chkExibirCabecalho" checked onchange="alternarSecaoCabecalho()" class="w-4 h-4 accent-blue-700 rounded">
+                            Incluir Cabeçalho + Banner
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                            <input type="checkbox" id="chkCaixaNota" checked class="w-4 h-4 accent-blue-700 rounded">
+                            Incluir Caixa NOTA:
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer text-red-600">
+                            <input type="checkbox" id="chkAdaptada" class="w-4 h-4 accent-red-600 rounded">
+                            Prova Adaptada (Vermelho)
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer text-emerald-700">
+                            <input type="checkbox" id="chkExibirGabarito" checked onchange="alternarSecaoGabarito()" class="w-4 h-4 accent-emerald-600 rounded">
+                            Incluir Gabarito
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Controles de Banner e Campos do Cabeçalho -->
+                <div id="painelCabecalhoCampos" class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                    <div class="md:col-span-3">
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Modelo de Cabeçalho / Banner</label>
+                        <select id="selTipoAvaliacao" onchange="aoMudarTipoAvaliacao()" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-medium bg-slate-50 focus:bg-white focus:border-blue-600 outline-none">
+                            <option value="mensal">Avaliação Mensal</option>
+                            <option value="bimestral">Avaliação Bimestral</option>
+                            <option value="acn">ACN - Avaliação Complementar</option>
+                            <option value="diagnostica">Avaliação Diagnóstica</option>
+                            <option value="final">Recuperação Final</option>
+                            <option value="atividade">Atividade</option>
+                            <option value="ta">Trabalho Avaliativo (TA)</option>
+                            <option value="td">Trabalho Dirigido (TD)</option>
+                            <option value="guia">Guia de Estudo</option>
+                            <option value="extra">Material Extra</option>
+                        </select>
+                    </div>
+
+                    <div class="md:col-span-4">
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Imagem do Banner (Opcional: Enviar PNG/JPG)</label>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="document.getElementById('bannerFileInput').click()" class="bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-semibold px-3 py-2 rounded-lg text-xs flex items-center gap-1.5 transition">
+                                <i class="fa-solid fa-image text-blue-600"></i> Escolher Imagem
+                            </button>
+                            <span id="bannerCustomLabel" class="text-xs text-slate-500 truncate flex-1">Usando banner padrão do modelo</span>
+                            <button type="button" id="btnLimparBanner" onclick="limparBannerCustomizado()" class="hidden text-xs text-red-600 hover:underline font-semibold">Remover</button>
+                            <input type="file" id="bannerFileInput" accept="image/png,image/jpeg,image/webp" class="hidden" onchange="handleBannerUpload(event)">
+                        </div>
+                    </div>
+
+                    <div class="md:col-span-3">
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Disciplina</label>
+                        <input type="text" id="inpDisciplina" placeholder="Ex: BIOLOGIA 1" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold uppercase focus:border-blue-600 outline-none">
+                    </div>
+
+                    <div class="md:col-span-2">
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Turma / Nível</label>
+                        <input type="text" id="inpTurma" placeholder="Ex: 3º Ano – MÉDIO" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-blue-600 outline-none">
+                    </div>
+
+                    <div class="md:col-span-3">
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Bimestre</label>
+                        <input type="text" id="inpBimestre" placeholder="Ex: 4º Bimestre" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-blue-600 outline-none">
+                    </div>
+
+                    <div class="md:col-span-3">
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Chamada</label>
+                        <input type="text" id="inpChamada" placeholder="Ex: 1ª Chamada" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-blue-600 outline-none">
+                    </div>
+
+                    <div class="md:col-span-4">
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Professor(a)</label>
+                        <input type="text" id="inpProfessor" placeholder="Ex: LUCA DE LUNA" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-blue-600 outline-none">
+                    </div>
+
+                    <div class="md:col-span-2">
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Data</label>
+                        <input type="text" id="inpData" value="____/____/2026" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-blue-600 outline-none">
+                    </div>
+                </div>
+
+                <!-- Pré-visualização da Imagem de Banner Selecionada -->
+                <div id="bannerPreviewBox" class="hidden mt-3 p-2 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3">
+                        <img id="bannerPreviewImg" src="" alt="Prévia do Banner" class="h-12 object-contain rounded border border-slate-300 bg-white">
+                        <span class="text-xs text-slate-600 font-medium">Banner personalizado carregado para o topo do documento.</span>
+                    </div>
+                </div>
+
+                <!-- Opções do Gabarito (Cartão-Resposta) -->
+                <div id="painelGabaritoCampos" class="mt-4 pt-3 border-t border-slate-200 flex flex-wrap items-center gap-6 bg-emerald-50/60 px-4 py-2.5 rounded-lg">
+                    <span class="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                        <i class="fa-solid fa-list-check"></i> Configuração do Cartão-Resposta:
+                    </span>
+                    <div class="flex items-center gap-2">
+                        <label for="inpQtdGabarito" class="text-xs font-medium text-slate-700">Nº de questões no gabarito:</label>
+                        <input type="number" id="inpQtdGabarito" min="1" max="100" class="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-bold text-center bg-white">
+                    </div>
+                    <label class="flex items-center gap-1.5 cursor-pointer text-xs font-medium text-slate-700">
+                        <input type="checkbox" id="chkIdiomasGabarito" class="w-4 h-4 accent-emerald-600 rounded">
+                        Incluir opção "Inglês ○  Espanhol ○" no topo do gabarito
+                    </label>
+                </div>
+            </div>
+
+            <!-- Comparador Lado a Lado -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 
-                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[75vh]">
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[70vh]">
                     <div class="flex justify-between items-center mb-3 pb-2 border-b">
                         <h3 class="font-bold text-slate-700 text-sm uppercase tracking-wider flex items-center gap-2">
                             <i class="fa-solid fa-file-word text-blue-600"></i> Documento Original (Professor)
@@ -75,7 +188,7 @@
                     <div id="originalDocContainer" class="flex-1 overflow-y-auto p-4 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-2 font-serif"></div>
                 </div>
 
-                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[75vh]">
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[70vh]">
                     <div class="flex justify-between items-center mb-3 pb-2 border-b">
                         <h3 class="font-bold text-slate-700 text-sm uppercase tracking-wider flex items-center gap-2">
                             <i class="fa-solid fa-pen-to-square text-green-600"></i> Editor Acelera (Editável)
@@ -95,6 +208,9 @@
     <script>
         let provaData = null;
         let arquivoOriginal = null;
+        let bannerCustomizadoPath = null;
+
+        const TIPOS_COM_NOTA = new Set(['mensal', 'bimestral', 'acn', 'diagnostica', 'final', 'recuperacao']);
 
         function handleFileSelect(event) {
             const file = event.target.files[0];
@@ -107,10 +223,108 @@
         function reiniciarInterface() {
             provaData = null;
             arquivoOriginal = null;
+            bannerCustomizadoPath = null;
             document.getElementById('docxInput').value = '';
             document.getElementById('fileNameDisplay').textContent = 'Clique para selecionar o ficheiro .docx';
+            limparBannerCustomizado();
             document.getElementById('previewSection').classList.add('hidden');
             document.getElementById('uploadSection').classList.remove('hidden');
+        }
+
+        function alternarSecaoCabecalho() {
+            const ativo = document.getElementById('chkExibirCabecalho').checked;
+            const painel = document.getElementById('painelCabecalhoCampos');
+            painel.classList.toggle('opacity-40', !ativo);
+            painel.classList.toggle('pointer-events-none', !ativo);
+        }
+
+        function alternarSecaoGabarito() {
+            const ativo = document.getElementById('chkExibirGabarito').checked;
+            const painel = document.getElementById('painelGabaritoCampos');
+            painel.classList.toggle('hidden', !ativo);
+        }
+
+        function aoMudarTipoAvaliacao() {
+            const tipo = document.getElementById('selTipoAvaliacao').value;
+            const temNota = TIPOS_COM_NOTA.has(tipo);
+            document.getElementById('chkCaixaNota').checked = temNota;
+            document.getElementById('chkExibirGabarito').checked = temNota;
+            alternarSecaoGabarito();
+        }
+
+        async function handleBannerUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/v1/pdf/upload-banner', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Falha ao enviar imagem do banner.');
+                }
+                const res = await response.json();
+                bannerCustomizadoPath = res.banner_path;
+
+                document.getElementById('bannerCustomLabel').textContent = file.name;
+                document.getElementById('btnLimparBanner').classList.remove('hidden');
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('bannerPreviewImg').src = e.target.result;
+                    document.getElementById('bannerPreviewBox').classList.remove('hidden');
+                };
+                reader.readAsDataURL(file);
+            } catch (error) {
+                alert('Erro ao carregar banner: ' + error.message);
+            }
+        }
+
+        function limparBannerCustomizado() {
+            bannerCustomizadoPath = null;
+            const inp = document.getElementById('bannerFileInput');
+            if (inp) inp.value = '';
+            const lbl = document.getElementById('bannerCustomLabel');
+            if (lbl) lbl.textContent = 'Usando banner padrão do modelo';
+            const btn = document.getElementById('btnLimparBanner');
+            if (btn) btn.classList.add('hidden');
+            const box = document.getElementById('bannerPreviewBox');
+            if (box) box.classList.add('hidden');
+        }
+
+        function preencherPainelControle(dados) {
+            const tipo = (dados.tipo_avaliacao || 'mensal').toLowerCase();
+            const selTipo = document.getElementById('selTipoAvaliacao');
+            if ([...selTipo.options].some(o => o.value === tipo)) {
+                selTipo.value = tipo;
+            } else {
+                selTipo.value = 'mensal';
+            }
+
+            document.getElementById('inpDisciplina').value = dados.disciplina || 'DISCIPLINA';
+            document.getElementById('inpTurma').value = dados.turma || '1º Ano';
+            document.getElementById('inpBimestre').value = dados.bimestre || '4º Bimestre';
+            document.getElementById('inpChamada').value = dados.chamada || '1ª Chamada';
+            document.getElementById('inpProfessor').value = dados.professor || '';
+            document.getElementById('inpData').value = dados.data_prova || '____/____/2026';
+
+            document.getElementById('chkAdaptada').checked = Boolean(dados.is_adaptada);
+            document.getElementById('chkExibirCabecalho').checked = true;
+            alternarSecaoCabecalho();
+
+            const temNota = TIPOS_COM_NOTA.has(selTipo.value);
+            document.getElementById('chkCaixaNota').checked = temNota;
+            document.getElementById('chkExibirGabarito').checked = temNota;
+            alternarSecaoGabarito();
+
+            const qtdObj = (dados.questoes || []).filter(q => q.alternativas && q.alternativas.length > 0).length;
+            document.getElementById('inpQtdGabarito').value = qtdObj > 0 ? qtdObj : 10;
+            document.getElementById('chkIdiomasGabarito').checked = false;
         }
 
         async function enviarDocx() {
@@ -136,9 +350,13 @@
                     body: formData
                 });
 
-                if (!response.ok) throw new Error('Falha ao processar documento');
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || 'Falha ao processar documento');
+                }
 
                 provaData = await response.json();
+                preencherPainelControle(provaData);
                 renderizarQuestoesEditaveis();
 
                 document.getElementById('loading').classList.add('hidden');
@@ -178,6 +396,7 @@
                 }
 
                 provaData = await response.json();
+                preencherPainelControle(provaData);
                 renderizarQuestoesEditaveis();
                 alert('A IA reestruturou a prova com sucesso!');
 
@@ -198,7 +417,7 @@
                     .then(function(result) {
                         document.getElementById('originalDocContainer').innerHTML = result.value;
                     })
-                    .catch(function(err) {
+                    .catch(function() {
                         document.getElementById('originalDocContainer').innerHTML = 
                             '<p class="text-red-500">Não foi possível carregar a pré-visualização do documento original.</p>';
                     });
@@ -216,17 +435,27 @@
                 const qDiv = document.createElement('div');
                 qDiv.className = 'border border-slate-200 rounded-lg p-4 bg-slate-50 hover:bg-white transition shadow-sm';
                 
+                let tabelaHtml = '';
+                if (q.tabela && q.tabela.linhas && q.tabela.linhas.length > 0) {
+                    const rows = q.tabela.linhas.map((linha, rIdx) => {
+                        const cells = linha.map(cel => `<td class="border border-slate-300 px-2 py-1 text-center ${rIdx === 0 ? 'font-bold bg-slate-100' : ''}">${cel}</td>`).join('');
+                        return `<tr>${cells}</tr>`;
+                    }).join('');
+                    tabelaHtml = `<table class="w-full border-collapse border border-slate-300 text-xs my-2">${rows}</table>`;
+                }
+
                 let altsHtml = q.alternativas.map((alt, aIndex) => 
                     `<li class="text-xs text-slate-700 flex items-start gap-1">
-                        <strong class="text-blue-900 font-bold">(${alt.letra})</strong> 
+                        <strong class="text-blue-900 font-bold">${alt.letra})</strong> 
                         <span contenteditable="true" onblur="atualizarAlternativa(${qIndex}, ${aIndex}, this.innerText)" class="flex-1 outline-none focus:bg-yellow-50 focus:p-0.5 rounded">${alt.texto}</span>
                     </li>`
                 ).join('');
 
                 qDiv.innerHTML = `
                     <div class="font-bold text-sm text-slate-800 mb-1">Questão ${q.numero}</div>
-                    <p contenteditable="true" onblur="atualizarEnunciado(${qIndex}, this.innerText)" class="text-xs text-slate-700 mb-3 whitespace-pre-line outline-none focus:bg-yellow-50 focus:p-1 rounded">${q.enunciado}</p>
-                    <ul class="space-y-1 pl-2 border-l-2 border-blue-500">${altsHtml}</ul>
+                    <p contenteditable="true" onblur="atualizarEnunciado(${qIndex}, this.innerText)" class="text-xs text-slate-700 mb-2 whitespace-pre-line outline-none focus:bg-yellow-50 focus:p-1 rounded">${q.enunciado}</p>
+                    ${tabelaHtml}
+                    <ul class="space-y-1 pl-2 border-l-2 border-blue-500 mt-2">${altsHtml}</ul>
                 `;
                 container.appendChild(qDiv);
             });
@@ -248,17 +477,45 @@
                 nomeOriginal = arquivoOriginal.name.replace(/\.docx$/i, "");
             }
 
+            const tipoAvaliacao = document.getElementById('selTipoAvaliacao').value;
+            const exibirCabecalho = document.getElementById('chkExibirCabecalho').checked;
+            const exibirCaixaNota = document.getElementById('chkCaixaNota').checked;
+            const isAdaptada = document.getElementById('chkAdaptada').checked;
+            const exibirGabarito = document.getElementById('chkExibirGabarito').checked;
+            const qtdQuestoesGabarito = parseInt(document.getElementById('inpQtdGabarito').value, 10) || null;
+            const exibirIdiomasGabarito = document.getElementById('chkIdiomasGabarito').checked;
+
+            const payload = {
+                ...provaData,
+                tipo_avaliacao: tipoAvaliacao,
+                tipo_cabecalho: tipoAvaliacao,
+                disciplina: document.getElementById('inpDisciplina').value.trim() || provaData.disciplina,
+                turma: document.getElementById('inpTurma').value.trim() || provaData.turma,
+                bimestre: document.getElementById('inpBimestre').value.trim() || provaData.bimestre,
+                chamada: document.getElementById('inpChamada').value.trim() || provaData.chamada,
+                professor: document.getElementById('inpProfessor').value.trim() || provaData.professor,
+                data_prova: document.getElementById('inpData').value.trim() || '____/____/2026',
+                is_adaptada: isAdaptada,
+                exibir_cabecalho: exibirCabecalho,
+                exibir_caixa_nota: exibirCaixaNota,
+                exibir_gabarito: exibirGabarito,
+                qtd_questoes_gabarito: qtdQuestoesGabarito,
+                exibir_idiomas_gabarito: exibirIdiomasGabarito,
+                banner_customizado_path: bannerCustomizadoPath,
+                nome_arquivo_original: nomeOriginal
+            };
+
             try {
                 const response = await fetch('/api/v1/pdf/gerar-docx-formatado', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        ...provaData,
-                        nome_arquivo_original: nomeOriginal
-                    })
+                    body: JSON.stringify(payload)
                 });
 
-                if (!response.ok) throw new Error('Erro ao gerar documento .docx');
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.detail || 'Erro ao gerar documento .docx');
+                }
 
                 const result = await response.json();
                 window.location.href = result.download_url;

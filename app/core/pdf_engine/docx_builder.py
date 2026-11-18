@@ -107,22 +107,32 @@ def _configurar_borda_celula_nota(cell):
     tcPr.append(borders)
 
 
-def _inserir_cartao_resposta(doc: Document, total_questoes_objetivas: int):
-    if total_questoes_objetivas <= 0:
+def _inserir_cartao_resposta(doc: Document, total_questoes: int, exibir_idiomas: bool = False):
+    if total_questoes <= 0:
         return
 
-    colunas = 1 if total_questoes_objetivas <= 10 else (2 if total_questoes_objetivas <= 20 else 3)
-    linhas_por_col = (total_questoes_objetivas + colunas - 1) // colunas
+    if exibir_idiomas:
+        p_idioma = doc.add_paragraph()
+        _garantir_paragrafo_sem_marcador(p_idioma)
+        p_idioma.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        p_idioma.paragraph_format.space_before = Pt(2)
+        p_idioma.paragraph_format.space_after = Pt(4)
+        r_idioma = p_idioma.add_run("      Inglês  ○          Espanhol  ○")
+        _aplicar_fonte_padrao(r_idioma, negrito=True, tamanho=11, cor_rgb=(0, 0, 0))
+
+    colunas = 1 if total_questoes <= 10 else (2 if total_questoes <= 20 else 3)
+    linhas_por_col = (total_questoes + colunas - 1) // colunas
 
     table = doc.add_table(rows=linhas_por_col, cols=colunas)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _configurar_bordas_tabela(table, borda_externa=False, bordas_internas=False)
 
-    for idx in range(total_questoes_objetivas):
+    for idx in range(total_questoes):
         col_idx = idx // linhas_por_col
         row_idx = idx % linhas_por_col
         cell = table.cell(row_idx, col_idx)
         p = cell.paragraphs[0]
+        _garantir_paragrafo_sem_marcador(p)
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_before = Pt(1)
         p.paragraph_format.space_after = Pt(1)
@@ -173,97 +183,127 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str, tipo_cabecalho
 
     tipo_bruto = prova.tipo_avaliacao or tipo_cabecalho or "mensal"
     tipo_chave = tipo_bruto.strip().lower()
-    eh_prova_oficial = tipo_chave in TIPOS_OFICIAIS_COM_NOTA
 
-    # 1. Banner Institucional Oficial
-    caminho_banner = MAPA_BANNERS.get(tipo_chave, "assets/cabecalhos/mensal.png")
-    p_banner = doc.add_paragraph()
-    p_banner.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_banner.paragraph_format.space_before = Pt(0)
-    p_banner.paragraph_format.space_after = Pt(2)
-    if os.path.exists(caminho_banner):
-        run_img = p_banner.add_run()
-        run_img.add_picture(caminho_banner, width=Cm(18.6))
+    if prova.exibir_caixa_nota is not None:
+        incluir_caixa_nota = prova.exibir_caixa_nota
     else:
-        run_fallback = p_banner.add_run("COLÉGIO SANTO ANTÔNIO")
-        _aplicar_fonte_padrao(run_fallback, negrito=True, tamanho=14, cor_rgb=(0, 0, 0))
+        incluir_caixa_nota = tipo_chave in TIPOS_OFICIAIS_COM_NOTA
 
-    _adicionar_borda_inferior_paragrafo(p_banner)
+    # 1. Cabeçalho Institucional (Banner + Disciplina + Dados do Aluno)
+    if prova.exibir_cabecalho:
+        caminho_banner = None
+        if prova.banner_customizado_path and os.path.exists(prova.banner_customizado_path):
+            caminho_banner = prova.banner_customizado_path
+        else:
+            caminho_banner = MAPA_BANNERS.get(tipo_chave, "assets/cabecalhos/mensal.png")
 
-    # 2. Disciplina + Destaque Vermelho (#FF3333) exclusivo para Prova Adaptada
-    p_disc = doc.add_paragraph()
-    p_disc.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_disc.paragraph_format.space_before = Pt(3)
-    p_disc.paragraph_format.space_after = Pt(4)
+        p_banner = doc.add_paragraph()
+        _garantir_paragrafo_sem_marcador(p_banner)
+        p_banner.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_banner.paragraph_format.space_before = Pt(0)
+        p_banner.paragraph_format.space_after = Pt(2)
+        if caminho_banner and os.path.exists(caminho_banner):
+            run_img = p_banner.add_run()
+            run_img.add_picture(caminho_banner, width=Cm(18.6))
+        else:
+            run_fallback = p_banner.add_run("COLÉGIO SANTO ANTÔNIO")
+            _aplicar_fonte_padrao(run_fallback, negrito=True, tamanho=14, cor_rgb=(0, 0, 0))
 
-    texto_disc = (prova.disciplina or "DISCIPLINA").strip().upper()
-    if prova.is_adaptada:
-        _aplicar_fundo_vermelho_paragrafo(p_disc, "FF3333")
-        run_disc = p_disc.add_run(f"  {texto_disc} (ADAPTADA)  ")
-        _aplicar_fonte_padrao(run_disc, negrito=True, tamanho=13, cor_rgb=(255, 255, 255))
-    else:
-        run_disc = p_disc.add_run(texto_disc)
-        _aplicar_fonte_padrao(run_disc, negrito=True, tamanho=13, cor_rgb=(0, 0, 0))
+        _adicionar_borda_inferior_paragrafo(p_banner)
 
-    # 3. Cabeçalho de Identificação + Caixa de Nota Ampliada
-    cols_cabecalho = 2 if eh_prova_oficial else 1
-    tabela_cab = doc.add_table(rows=1, cols=cols_cabecalho)
-    tabela_cab.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _configurar_bordas_tabela(tabela_cab, borda_externa=False, bordas_internas=False)
+        # Disciplina + Destaque Vermelho (#FF3333) exclusivo para Prova Adaptada
+        p_disc = doc.add_paragraph()
+        _garantir_paragrafo_sem_marcador(p_disc)
+        p_disc.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_disc.paragraph_format.space_before = Pt(3)
+        p_disc.paragraph_format.space_after = Pt(4)
 
-    cell_dados = tabela_cab.cell(0, 0)
-    cell_dados.width = Cm(15.8 if eh_prova_oficial else 18.6)
-    cell_dados.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        texto_disc = (prova.disciplina or "DISCIPLINA").strip().upper()
+        if prova.is_adaptada:
+            _aplicar_fundo_vermelho_paragrafo(p_disc, "FF3333")
+            run_disc = p_disc.add_run(f"  {texto_disc} (ADAPTADA)  ")
+            _aplicar_fonte_padrao(run_disc, negrito=True, tamanho=13, cor_rgb=(255, 255, 255))
+        else:
+            run_disc = p_disc.add_run(texto_disc)
+            _aplicar_fonte_padrao(run_disc, negrito=True, tamanho=13, cor_rgb=(0, 0, 0))
 
-    p_aluno = cell_dados.paragraphs[0]
-    p_aluno.paragraph_format.space_before = Pt(1)
-    p_aluno.paragraph_format.space_after = Pt(4)
-    linha_underline = "_" * 66 if eh_prova_oficial else "_" * 80
-    r_aluno = p_aluno.add_run(f"Aluno (a): {linha_underline}   Nº _____")
-    _aplicar_fonte_padrao(r_aluno, negrito=True, tamanho=12, cor_rgb=(0, 0, 0))
+        # Cabeçalho de Identificação + Caixa de Nota Ampliada
+        cols_cabecalho = 2 if incluir_caixa_nota else 1
+        tabela_cab = doc.add_table(rows=1, cols=cols_cabecalho)
+        tabela_cab.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _configurar_bordas_tabela(tabela_cab, borda_externa=False, bordas_internas=False)
 
-    p_meta = cell_dados.add_paragraph()
-    p_meta.paragraph_format.space_before = Pt(0)
-    p_meta.paragraph_format.space_after = Pt(2)
+        cell_dados = tabela_cab.cell(0, 0)
+        cell_dados.width = Cm(15.8 if incluir_caixa_nota else 18.6)
+        cell_dados.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
-    partes_meta = [
-        (prova.turma or "1º Ano").strip(),
-        (prova.bimestre or "4º Bimestre").strip(),
-    ]
-    if eh_prova_oficial:
-        partes_meta.append((prova.chamada or "1ª Chamada").strip())
-    partes_meta.append(f"Prof. {(prova.professor or '').strip()}")
-    partes_meta.append("DATA: ____/____/2026")
+        p_aluno = cell_dados.paragraphs[0]
+        _garantir_paragrafo_sem_marcador(p_aluno)
+        p_aluno.paragraph_format.space_before = Pt(1)
+        p_aluno.paragraph_format.space_after = Pt(4)
+        linha_underline = "_" * 66 if incluir_caixa_nota else "_" * 80
+        r_aluno = p_aluno.add_run(f"Aluno (a): {linha_underline}   Nº _____")
+        _aplicar_fonte_padrao(r_aluno, negrito=True, tamanho=12, cor_rgb=(0, 0, 0))
 
-    r_meta = p_meta.add_run("      ".join(partes_meta))
-    _aplicar_fonte_padrao(r_meta, negrito=True, tamanho=12, cor_rgb=(0, 0, 0))
+        p_meta = cell_dados.add_paragraph()
+        _garantir_paragrafo_sem_marcador(p_meta)
+        p_meta.paragraph_format.space_before = Pt(0)
+        p_meta.paragraph_format.space_after = Pt(2)
 
-    if eh_prova_oficial:
-        cell_nota = tabela_cab.cell(0, 1)
-        cell_nota.width = Cm(2.8)
-        cell_nota.vertical_alignment = WD_ALIGN_VERTICAL.TOP
-        _configurar_borda_celula_nota(cell_nota)
+        partes_meta = [(prova.turma or "1º Ano").strip()]
+        if tipo_chave == "acn":
+            partes_meta.append("ACN")
+        elif tipo_chave in {"final", "recuperacao"}:
+            partes_meta.append("Recuperação")
+        else:
+            if (prova.bimestre or "").strip():
+                partes_meta.append(prova.bimestre.strip())
 
-        p_nota = cell_nota.paragraphs[0]
-        p_nota.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p_nota.paragraph_format.space_before = Pt(2)
-        p_nota.paragraph_format.space_after = Pt(18)
-        r_nota = p_nota.add_run("NOTA:")
-        _aplicar_fonte_padrao(r_nota, negrito=True, tamanho=11, cor_rgb=(0, 0, 0))
+        if incluir_caixa_nota and (prova.chamada or "").strip():
+            partes_meta.append(prova.chamada.strip())
 
-    p_div_bottom = doc.add_paragraph()
-    p_div_bottom.paragraph_format.space_before = Pt(0)
-    p_div_bottom.paragraph_format.space_after = Pt(4)
-    _adicionar_borda_inferior_paragrafo(p_div_bottom)
+        partes_meta.append(f"Prof. {(prova.professor or '').strip()}")
+        partes_meta.append(f"DATA: {(prova.data_prova or '____/____/2026').strip()}")
 
-    # 4. Cartão-Resposta
-    if eh_prova_oficial and prova.exibir_gabarito:
+        r_meta = p_meta.add_run("      ".join(partes_meta))
+        _aplicar_fonte_padrao(r_meta, negrito=True, tamanho=12, cor_rgb=(0, 0, 0))
+
+        if incluir_caixa_nota:
+            cell_nota = tabela_cab.cell(0, 1)
+            cell_nota.width = Cm(2.8)
+            cell_nota.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+            _configurar_borda_celula_nota(cell_nota)
+
+            p_nota = cell_nota.paragraphs[0]
+            _garantir_paragrafo_sem_marcador(p_nota)
+            p_nota.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p_nota.paragraph_format.space_before = Pt(2)
+            p_nota.paragraph_format.space_after = Pt(18)
+            r_nota = p_nota.add_run("NOTA:")
+            _aplicar_fonte_padrao(r_nota, negrito=True, tamanho=11, cor_rgb=(0, 0, 0))
+
+        p_div_bottom = doc.add_paragraph()
+        _garantir_paragrafo_sem_marcador(p_div_bottom)
+        p_div_bottom.paragraph_format.space_before = Pt(0)
+        p_div_bottom.paragraph_format.space_after = Pt(4)
+        _adicionar_borda_inferior_paragrafo(p_div_bottom)
+
+    # 2. Cartão-Resposta (Controlado manualmente pelo operador no painel)
+    if prova.exibir_gabarito:
         qtd_objetivas = sum(1 for q in prova.questoes if len(q.alternativas) > 0)
-        _inserir_cartao_resposta(doc, qtd_objetivas)
+        total_gabarito = (
+            prova.qtd_questoes_gabarito
+            if (prova.qtd_questoes_gabarito is not None and prova.qtd_questoes_gabarito > 0)
+            else qtd_objetivas
+        )
+        _inserir_cartao_resposta(
+            doc,
+            total_questoes=total_gabarito,
+            exibir_idiomas=prova.exibir_idiomas_gabarito,
+        )
 
-    # 5. Corpo das Questões
+    # 3. Corpo das Questões (Intacto)
     for q in prova.questoes:
-        # Exatamente 1 linha em branco antes de cada "Questão X"
         p_vazio = doc.add_paragraph()
         _garantir_paragrafo_sem_marcador(p_vazio)
         p_vazio.paragraph_format.space_before = Pt(0)
@@ -271,7 +311,6 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str, tipo_cabecalho
         p_vazio.paragraph_format.line_spacing = 1.15
         _aplicar_fonte_padrao(p_vazio.add_run(""), negrito=False, tamanho=12, cor_rgb=(0, 0, 0))
 
-        # "Questão X" em negrito, em linha dedicada
         p_q_titulo = doc.add_paragraph()
         _garantir_paragrafo_sem_marcador(p_q_titulo)
         p_q_titulo.paragraph_format.space_before = Pt(0)
@@ -280,7 +319,6 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str, tipo_cabecalho
         p_q_titulo.paragraph_format.keep_with_next = True
         _aplicar_fonte_padrao(p_q_titulo.add_run(f"Questão {q.numero}"), negrito=True, tamanho=12, cor_rgb=(0, 0, 0))
 
-        # Enunciado limpo (remove linhas vazias duplicadas e força preto #000000)
         linhas_enunciado = [l.strip() for l in q.enunciado.split("\n") if l.strip()]
         for linha in linhas_enunciado:
             p_enunc = doc.add_paragraph()
@@ -290,11 +328,9 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str, tipo_cabecalho
             p_enunc.paragraph_format.line_spacing = 1.15
             _aplicar_fonte_padrao(p_enunc.add_run(linha), negrito=False, tamanho=12, cor_rgb=(0, 0, 0))
 
-        # Tabela interna da questão (se houver)
         if q.tabela:
             _inserir_tabela_questao(doc, q.tabela)
 
-        # Alternativas sempre em minúsculo (a), b), c)...), sem marcador automático e sempre em preto
         for alt in q.alternativas:
             letra_min = alt.letra.strip().lower().replace(")", "").replace(".", "")
             p_alt = doc.add_paragraph()
