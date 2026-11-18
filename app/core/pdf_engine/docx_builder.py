@@ -31,13 +31,13 @@ TIPOS_OFICIAIS_COM_NOTA = {
 }
 
 
-def _aplicar_fonte_padrao(run, negrito: bool = False, tamanho: int = 12, cor_rgb: tuple = None):
+def _aplicar_fonte_padrao(run, negrito: bool = False, tamanho: int = 12, cor_rgb: tuple = (0, 0, 0)):
+    """Força Arial Narrow, tamanho e cor explícita (preto por padrão, evitando vazamento de gabarito em vermelho)."""
     run.font.name = "Arial Narrow"
     run.font.size = Pt(tamanho)
     run.bold = negrito
-    if cor_rgb:
-        run.font.color.rgb = RGBColor(*cor_rgb)
-    # Garante Arial Narrow no XML (eastAsia / cs)
+    run.font.color.rgb = RGBColor(*cor_rgb)
+
     rPr = run._r.get_or_add_rPr()
     rFonts = rPr.find(qn("w:rFonts"))
     if rFonts is None:
@@ -48,8 +48,18 @@ def _aplicar_fonte_padrao(run, negrito: bool = False, tamanho: int = 12, cor_rgb
     rFonts.set(qn("w:cs"), "Arial Narrow")
 
 
+def _garantir_paragrafo_sem_marcador(paragrafo):
+    """Garante estilo Normal puro sem marcadores automáticos (w:numPr) e sem recuo."""
+    paragrafo.style = "Normal"
+    paragrafo.paragraph_format.left_indent = Pt(0)
+    paragrafo.paragraph_format.first_line_indent = Pt(0)
+    pPr = paragrafo._p.get_or_add_pPr()
+    numPr = pPr.find(qn("w:numPr"))
+    if numPr is not None:
+        pPr.remove(numPr)
+
+
 def _adicionar_borda_inferior_paragrafo(paragrafo, espessura: str = "12"):
-    """Adiciona linha divisória sólida de 1.5pt (12 eighths of a point)."""
     pPr = paragrafo._p.get_or_add_pPr()
     pBdr = parse_xml(
         f'<w:pBdr {nsdecls("w")}>'
@@ -60,7 +70,6 @@ def _adicionar_borda_inferior_paragrafo(paragrafo, espessura: str = "12"):
 
 
 def _aplicar_fundo_vermelho_paragrafo(paragrafo, cor_hex: str = "FF3333"):
-    """Aplica destaque marca-texto vermelho (#FF3333) para Prova Adaptada."""
     pPr = paragrafo._p.get_or_add_pPr()
     shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{cor_hex}"/>')
     pPr.append(shd)
@@ -118,13 +127,12 @@ def _inserir_cartao_resposta(doc: Document, total_questoes_objetivas: int):
 
         num_str = f"{idx + 1}- "
         run = p.add_run(f"{num_str}A ○   B ○   C ○   D ○   E ○")
-        _aplicar_fonte_padrao(run, negrito=True, tamanho=11)
+        _aplicar_fonte_padrao(run, negrito=True, tamanho=11, cor_rgb=(0, 0, 0))
 
 
 def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
     doc = Document()
 
-    # Margens A4 padrão (1.2 cm laterais, 1.0 cm superior/inferior)
     for section in doc.sections:
         section.page_width = Cm(21.0)
         section.page_height = Cm(29.7)
@@ -136,7 +144,7 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
     tipo_chave = (prova.tipo_avaliacao or "mensal").strip().lower()
     eh_prova_oficial = tipo_chave in TIPOS_OFICIAIS_COM_NOTA
 
-    # 1. Banner Institucional (assets/cabecalhos/*.png)
+    # 1. Banner Institucional Oficial
     caminho_banner = MAPA_BANNERS.get(tipo_chave, "assets/cabecalhos/mensal.png")
     p_banner = doc.add_paragraph()
     p_banner.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -147,11 +155,11 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
         run_img.add_picture(caminho_banner, width=Cm(18.6))
     else:
         run_fallback = p_banner.add_run("COLÉGIO SANTO ANTÔNIO")
-        _aplicar_fonte_padrao(run_fallback, negrito=True, tamanho=14)
+        _aplicar_fonte_padrao(run_fallback, negrito=True, tamanho=14, cor_rgb=(0, 0, 0))
 
     _adicionar_borda_inferior_paragrafo(p_banner)
 
-    # 2. Disciplina + Destaque Vermelho (#FF3333) se Prova Adaptada
+    # 2. Disciplina + Destaque Vermelho (#FF3333) exclusivo para Prova Adaptada
     p_disc = doc.add_paragraph()
     p_disc.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_disc.paragraph_format.space_before = Pt(3)
@@ -164,9 +172,9 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
         _aplicar_fonte_padrao(run_disc, negrito=True, tamanho=13, cor_rgb=(255, 255, 255))
     else:
         run_disc = p_disc.add_run(texto_disc)
-        _aplicar_fonte_padrao(run_disc, negrito=True, tamanho=13)
+        _aplicar_fonte_padrao(run_disc, negrito=True, tamanho=13, cor_rgb=(0, 0, 0))
 
-    # 3. Bloco de Identificação (Cabeçalho em Negrito + Caixa de Nota Ampliada condicional)
+    # 3. Cabeçalho de Identificação + Caixa de Nota Ampliada
     cols_cabecalho = 2 if eh_prova_oficial else 1
     tabela_cab = doc.add_table(rows=1, cols=cols_cabecalho)
     tabela_cab.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -181,7 +189,7 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
     p_aluno.paragraph_format.space_after = Pt(4)
     linha_underline = "_" * 66 if eh_prova_oficial else "_" * 80
     r_aluno = p_aluno.add_run(f"Aluno (a): {linha_underline}   Nº _____")
-    _aplicar_fonte_padrao(r_aluno, negrito=True, tamanho=12)
+    _aplicar_fonte_padrao(r_aluno, negrito=True, tamanho=12, cor_rgb=(0, 0, 0))
 
     p_meta = cell_dados.add_paragraph()
     p_meta.paragraph_format.space_before = Pt(0)
@@ -197,7 +205,7 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
     partes_meta.append("DATA: ____/____/2026")
 
     r_meta = p_meta.add_run("      ".join(partes_meta))
-    _aplicar_fonte_padrao(r_meta, negrito=True, tamanho=12)
+    _aplicar_fonte_padrao(r_meta, negrito=True, tamanho=12, cor_rgb=(0, 0, 0))
 
     if eh_prova_oficial:
         cell_nota = tabela_cab.cell(0, 1)
@@ -208,59 +216,63 @@ def gerar_documento_oficial(prova: ProvaSchema, output_path: str) -> str:
         p_nota = cell_nota.paragraphs[0]
         p_nota.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p_nota.paragraph_format.space_before = Pt(2)
-        p_nota.paragraph_format.space_after = Pt(18)  # Altura ampliada conforme pedido da gráfica
+        p_nota.paragraph_format.space_after = Pt(18)
         r_nota = p_nota.add_run("NOTA:")
-        _aplicar_fonte_padrao(r_nota, negrito=True, tamanho=11)
+        _aplicar_fonte_padrao(r_nota, negrito=True, tamanho=11, cor_rgb=(0, 0, 0))
 
     p_div_bottom = doc.add_paragraph()
     p_div_bottom.paragraph_format.space_before = Pt(0)
     p_div_bottom.paragraph_format.space_after = Pt(4)
     _adicionar_borda_inferior_paragrafo(p_div_bottom)
 
-    # 4. Cartão-Resposta (Apenas para Provas Oficiais com questões objetivas)
+    # 4. Cartão-Resposta
     if eh_prova_oficial and prova.exibir_gabarito:
         qtd_objetivas = sum(1 for q in prova.questoes if len(q.alternativas) > 0)
         _inserir_cartao_resposta(doc, qtd_objetivas)
 
-    # 5. Corpo das Questões (Regras Estritas: Arial Narrow 12, linha em branco, Questão X isolado em negrito, alternativas minúsculas)
+    # 5. Corpo das Questões (Sempre preto absoluto #000000, 1 linha em branco, Questão X isolado em negrito, a) b) c) minúsculo)
     for q in prova.questoes:
-        # Linha em branco obrigatória antes de todos os "Questão X"
+        # Exatamente 1 linha em branco antes de cada "Questão X"
         p_vazio = doc.add_paragraph()
+        _garantir_paragrafo_sem_marcador(p_vazio)
         p_vazio.paragraph_format.space_before = Pt(0)
         p_vazio.paragraph_format.space_after = Pt(0)
         p_vazio.paragraph_format.line_spacing = 1.15
-        _aplicar_fonte_padrao(p_vazio.add_run(""))
+        _aplicar_fonte_padrao(p_vazio.add_run(""), negrito=False, tamanho=12, cor_rgb=(0, 0, 0))
 
-        # "Questão X" sozinho numa linha dedicada, antes do enunciado, sempre em negrito
+        # "Questão X" em negrito, em linha dedicada
         p_q_titulo = doc.add_paragraph()
+        _garantir_paragrafo_sem_marcador(p_q_titulo)
         p_q_titulo.paragraph_format.space_before = Pt(0)
         p_q_titulo.paragraph_format.space_after = Pt(0)
         p_q_titulo.paragraph_format.line_spacing = 1.15
         p_q_titulo.paragraph_format.keep_with_next = True
-        _aplicar_fonte_padrao(p_q_titulo.add_run(f"Questão {q.numero}"), negrito=True, tamanho=12)
+        _aplicar_fonte_padrao(p_q_titulo.add_run(f"Questão {q.numero}"), negrito=True, tamanho=12, cor_rgb=(0, 0, 0))
 
-        # Enunciado fiel ao original (preservando quebras de linha e sem recuo)
-        for linha in q.enunciado.split("\n"):
+        # Enunciado limpo (remove linhas vazias duplicadas internas e força preto #000000)
+        linhas_enunciado = [l.strip() for l in q.enunciado.split("\n") if l.strip()]
+        for linha in linhas_enunciado:
             p_enunc = doc.add_paragraph()
+            _garantir_paragrafo_sem_marcador(p_enunc)
             p_enunc.paragraph_format.space_before = Pt(0)
             p_enunc.paragraph_format.space_after = Pt(0)
             p_enunc.paragraph_format.line_spacing = 1.15
-            p_enunc.paragraph_format.first_line_indent = Pt(0)
-            _aplicar_fonte_padrao(p_enunc.add_run(linha), negrito=False, tamanho=12)
+            _aplicar_fonte_padrao(p_enunc.add_run(linha), negrito=False, tamanho=12, cor_rgb=(0, 0, 0))
 
-        # Alternativas sempre em letras minúsculas, texto puro sem marcadores automáticos
+        # Alternativas sempre em minúsculo (a), b), c)...), sem marcador automático e sempre em preto
         for alt in q.alternativas:
             letra_min = alt.letra.strip().lower().replace(")", "").replace(".", "")
             p_alt = doc.add_paragraph()
+            _garantir_paragrafo_sem_marcador(p_alt)
             p_alt.paragraph_format.space_before = Pt(0)
             p_alt.paragraph_format.space_after = Pt(0)
             p_alt.paragraph_format.line_spacing = 1.15
-            p_alt.paragraph_format.first_line_indent = Pt(0)
-            _aplicar_fonte_padrao(p_alt.add_run(f"{letra_min}) {alt.texto}"), negrito=False, tamanho=12)
+            _aplicar_fonte_padrao(p_alt.add_run(f"{letra_min}) {alt.texto}"), negrito=False, tamanho=12, cor_rgb=(0, 0, 0))
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     doc.save(output_path)
     return output_path
+
 
 class ProvaDocxBuilder:
     def __init__(self, prova: ProvaSchema = None):

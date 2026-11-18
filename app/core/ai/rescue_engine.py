@@ -1,70 +1,226 @@
 import os
+import re
 import json
+import time
 from google import genai
 from google.genai import types
-from app.schemas.prova import ProvaSchema, QuestaoSchema, AlternativaSchema
+from app.schemas.prova import ProvaSchema, QuestaoSchema, AlternativaSchema, TabelaQuestaoSchema
+
 
 class AIRescueEngine:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.ultimo_erro: str | None = None
+        self.modelos_fallback = [
+            "gemini-3.8-flash",
+            "gemini-3.8-flash-lite",
+        ]
+
+    def _extracao_contingencia_local(self, texto_bruto: str) -> ProvaSchema:
+        """
+        Contingência local apenas se a API do Google estiver fora do ar (503/429).
+        Suporta tanto questões numeradas quanto blocos separados por conjuntos de alternativas (A..E).
+        """
+        linhas = [l.strip() for l in texto_bruto.splitlines() if l.strip()]
+
+        disciplina = "DISCIPLINA"
+        professor = "PROFESSOR"
+        turma = "1º Ano"
+        tipo_avaliacao = "mensal"
+
+        for l in linhas[:12]:
+            l_upper = l.upper()
+            if "PROF." in l_upper:
+                m_prof = re.search(r"Prof\.\s*([A-ZÀ-Ú\s]+?)(?:\s+DATA:|$)", l, re.IGNORECASE)
+                if m_prof:
+                    professor = m_prof.group(1).strip()
+            if any(t in l_upper for t in ["1º ANO", "2º ANO", "3º ANO", "6º ANO", "7º ANO", "8º ANO", "9º ANO"]):
+                m_turma = re.search(r"([1-9]º\s*Ano(?:\s*[–-]\s*[A-ZÀ-Ú]+)?)", l, re.IGNORECASE)
+                if m_turma:
+                    turma = m_turma.group(1).strip()
+            if "ACN" in l_upper:
+                tipo_avaliacao = "acn"
+            elif "BIMESTRAL" in l_upper:
+                tipo_avaliacao = "bimestral"
+
+            for disc_nome in [
+                "BIOLOGIA 1", "BIOLOGIA 2", "BIOLOGIA", "FÍSICA 1", "FÍSICA 2", "FÍSICA",
+                "QUÍMICA 1", "QUÍMICA 2", "QUÍMICA", "MATEMÁTICA 1", "MATEMÁTICA 2", "MATEMÁTICA",
+                "HISTÓRIA", "GEOGRAFIA", "PORTUGUÊS", "LÍNGUA PORTUGUESA", "INGLÊS", "ESPANHOL",
+                "FILOSOFIA", "SOCIOLOGIA", "LITERATURA", "REDAÇÃO", "ARTES", "EDUCAÇÃO FÍSICA",
+            ]:
+                if disc_nome in l_upper and len(l) <= 40:
+                    disciplina = re.sub(r"NOTA\s*:", "", l, flags=re.IGNORECASE).strip().upper()
+                    break
+
+        padrao_q_num = re.compile(r"^(?:Quest[ãa]o\s*)?0?(\d{1,2})[\.\)\-–]\s*(.+)$", re.IGNORECASE)
+        padrao_alt = re.compile(r"^([a-eA-E])[\)\.\-]\s*(.+)$")
+
+        questoes: list[QuestaoSchema] = []
+        buffer_enunciado: list[str] = []
+        alternativas_atuais: list[AlternativaSchema] = []
+        numero_atual = 1
+
+        def _fechar_questao():
+            nonlocal numero_atual, buffer_enunciado, alternativas_atuais
+            if buffer_enunciado:
+                enunc_texto = "\n".join(buffer_enunciado).strip()
+                questoes.append(
+                    QuestaoSchema(
+                        numero=numero_atual,
+                        enunciado=enunc_texto,
+                        alternativas=alternativas_atuais,
+                    )
+                )
+                numero_atual += 1
+            buffer_enunciado = []
+            alternativas_atuais = []
+
+        for linha in linhas:
+            # Ignora ruídos de cabeçalho antigo
+            if any(
+                ign in linha.upper()
+                for ign in ["ALUNO (A):", "NÚMERO DE REGISTRO", "GABARITO", "A B C D E", "COLÉGIO SANTO ANTÔNIO"]
+            ):
+                continue
+
+            m_q = padrao_q_num.match(linha)
+            if m_q and not re.match(r"^\d{1,2}\s+A\s+B\s+C", linha, re.IGNORECASE):
+                if buffer_enunciado or alternativas_atuais:
+                    _fechar_questao()
+                numero_atual = int(m_q.group(1))
+                buffer_enunciado.append(m_q.group(2).strip())
+                continue
+
+            m_alt = padrao_alt.match(linha)
+            if m_alt:
+                letra = m_alt.group(1).lower()
+                # Se já fechou alternativas (ex: veio 'a)' depois de já ter 'd)' ou 'e)'), começa nova questão sem número
+                if letra == "a" and len(alternativas_atuais) >= 2:
+                    # A última linha do buffer anterior era o enunciado da nova questão
+                    novo_enunc = []
+                    if buffer_enunciado and len(buffer_enunciado) > 1:
+                        novo_enunc = [buffer_enunciado.pop()]
+                    _fechar_questao()
+                    buffer_enunciado = novo_enunc
+                alternativas_atuais.append(AlternativaSchema(letra=letra, texto=m_alt.group(2).strip()))
+                continue
+
+            # Se já temos alternativas fechadas (ex: 4 ou 5) e chegou um novo parágrafo longo sem ser alternativa,
+            # é o enunciado de uma nova questão que o professor mandou sem número
+            if len(alternativas_atuais) >= 4:
+                _fechar_questao()
+                buffer_enunciado.append(linha)
+            elif alternativas_atuais:
+                alternativas_atuais[-1].texto += " " + linha
+            else:
+                buffer_enunciado.append(linha)
+
+        _fechar_questao()
+
+        return ProvaSchema(
+            tipo_avaliacao=tipo_avaliacao,
+            disciplina=disciplina,
+            professor=professor,
+            turma=turma,
+            questoes=questoes,
+        )
 
     def estruturar_prova_com_ia(self, texto_bruto_prova: str) -> ProvaSchema:
         self.ultimo_erro = None
         if not self.client:
             self.ultimo_erro = "GEMINI_API_KEY não configurada no servidor."
             print(f"[AI-Rescue] {self.ultimo_erro}")
-            return ProvaSchema(questoes=[])
+            return self._extracao_contingencia_local(texto_bruto_prova)
 
         prompt = f"""
-        Você é um extrator estrutural estrito de provas do Colégio Santo Antônio.
-        Sua única tarefa é separar o texto abaixo em metadados, questões e alternativas no formato JSON.
+        Você é o motor de extração estrutural do sistema gráfico PAS/A do Colégio Santo Antônio.
+        Os professores enviam arquivos .docx totalmente fora do padrão: sem numeração nas questões (sem 01, 1, 1-), com numeração automática do Word removida, com alternativas em maiúsculo (A, B, C, D, E), com cabeçalhos antigos colados errado, com gabarito pintado de vermelho, com listas marcadas e com tabelas dentro dos enunciados.
 
-        REGRAS ABSOLUTAS E INVIOLÁVEIS:
-        1. FIDELIDADE 1:1 ABSOLUTA: NUNCA escreva, invente, resuma, remova ou sequer corrija erros de digitação, ortografia ou pontuação da prova original. Transcreva os enunciados e alternativas ESTRITAMENTE IGUAIS ao original.
-        2. SEM MARCADORES AUTOMÁTICOS: Se houver tópicos ou listas dentro do enunciado, mantenha o caractere literal original (ex: "· ") como texto simples. NUNCA converta para markdown (* ou -).
-        3. ALTERNATIVAS SEMPRE EM MINÚSCULO: As letras das alternativas devem ser SEMPRE minúsculas ("a", "b", "c", "d", "e"), mesmo que no original estejam em maiúsculo.
-        4. QUESTÕES DISCURSIVAS/ABERTAS: Se a questão não tiver alternativas, retorne "alternativas": [].
-        5. METADADOS: Extraia disciplina, professor, turma e tipo_avaliacao (valores válidos: "mensal", "bimestral", "acn", "atividade", "diagnostica", "extra", "final", "guia", "ta", "td") se constarem no topo do arquivo. Caso não constem, use os valores padrão.
+        SUA MISSÃO É SEGMENTAR E EXTRAIR TODO O CONTEÚDO EM JSON SEGUINDO ESTAS REGRAS INVIOLÁVEIS:
 
-        Retorne EXATAMENTE um JSON neste formato:
+        1. IDENTIFICAÇÃO SEMÂNTICA DE QUESTÕES SEM NÚMERO:
+           - Mesmo que o texto NÃO tenha "01.", "1)", "1 -" ou "Questão 1" antes de uma pergunta, identifique cada questão pela estrutura semântica (texto-base/comando seguido de alternativas, ou bloco de comando discursivo separado) e numere sequencialmente: 1, 2, 3, 4...
+           - Remova qualquer prefixo numérico antigo do início do enunciado (ex: se vier "01. Em um ecossistema...", o campo "enunciado" deve começar direto em "Em um ecossistema...").
+
+        2. FIDELIDADE 1:1 ABSOLUTA NO TEXTO:
+           - NUNCA reescreva, resuma, corrija erros de português, altere palavras ou mude a pontuação do enunciado ou das alternativas. Transcreva o texto do professor exatamente como foi escrito.
+           - Se houver tópicos dentro do enunciado (ex: "• Situação I:"), preserve o texto exato sem transformar em markdown (* ou -).
+
+        3. ALTERNATIVAS SEMPRE EM MINÚSCULO E SEM PREFIXO DUPLICADO:
+           - Extraia cada alternativa com "letra" sempre em minúsculo ("a", "b", "c", "d", "e") e "texto" contendo apenas o conteúdo da alternativa (sem repetir "A)" ou "a)" dentro de "texto").
+           - Se a questão for discursiva/aberta (sem alternativas), retorne "alternativas": [].
+
+        4. TABELAS DENTRO DE QUESTÕES:
+           - No texto abaixo, tabelas reais do Word aparecem delimitadas por [TABELA] e [/TABELA], com colunas separadas por " | ".
+           - Quando uma questão contiver uma tabela, extraia os dados dela no campo "tabela": {{"linhas": [["col1", "col2"], ["val1", "val2"]]}} e mantenha no "enunciado" o texto antes e depois da tabela (não repita os dados brutos da tabela dentro do texto corrido do enunciado). Se a questão não tiver tabela, retorne "tabela": null.
+
+        5. IGNORAR LIXO DE CABEÇALHO ANTIGO:
+           - Ignore linhas de cartão-resposta antigo ("Número de Registro", "Gabarito", "A B C D E"), "Aluno (a):", "NOTA:" e nomes de escola.
+           - Extraia os metadados do topo se existirem: "disciplina", "professor", "turma", "bimestre", "chamada" e "tipo_avaliacao" ("mensal", "bimestral", "acn", "atividade", "diagnostica", "extra", "final", "guia", "ta", "td").
+
+        Retorne EXATAMENTE um JSON válido neste formato:
         {{
-            "tipo_avaliacao": "mensal",
-            "disciplina": "FÍSICA",
-            "professor": "NOME DO PROFESSOR",
-            "turma": "1º Ano",
+            "tipo_avaliacao": "acn",
+            "disciplina": "BIOLOGIA 1",
+            "professor": "LUCA DE LUNA",
+            "turma": "3º Ano - MÉDIO",
             "bimestre": "4º Bimestre",
             "chamada": "1ª Chamada",
             "is_adaptada": false,
             "questoes": [
                 {{
                     "numero": 1,
-                    "enunciado": "Texto exatamente igual ao original",
+                    "enunciado": "Texto exatamente igual ao original sem o número inicial",
+                    "tabela": null,
                     "alternativas": [
-                        {{"letra": "a", "texto": "texto exatamente igual ao original"}},
-                        {{"letra": "b", "texto": "texto exatamente igual ao original"}}
+                        {{"letra": "a", "texto": "texto exato da alternativa a"}},
+                        {{"letra": "b", "texto": "texto exato da alternativa b"}}
                     ]
                 }}
             ]
         }}
 
-        Texto original:
+        Conteúdo extraído do arquivo do professor:
         ---
         {texto_bruto_prova}
         ---
         """
 
-        try:
-            response = self.client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.0,
-                ),
-            )
+        response = None
+        for modelo in self.modelos_fallback:
+            for tentativa in range(1, 4):
+                try:
+                    response = self.client.models.generate_content(
+                        model=modelo,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            temperature=0.0,
+                        ),
+                    )
+                    if response and response.text:
+                        break
+                except Exception as e:
+                    erro_str = str(e)
+                    self.ultimo_erro = erro_str
+                    print(f"[AI-Rescue] Tentativa {tentativa} falhou no modelo {modelo}: {erro_str}")
 
+                    if any(cod in erro_str for cod in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"]):
+                        time.sleep(2 * tentativa)
+                        continue
+                    else:
+                        break
+
+            if response and response.text:
+                break
+
+        if not response or not response.text:
+            print("[AI-Rescue] API indisponível após retentativas. Usando extrator de contingência local...")
+            return self._extracao_contingencia_local(texto_bruto_prova)
+
+        try:
             raw_json = response.text.strip()
             if raw_json.startswith("```"):
                 raw_json = raw_json.split("\n", 1)[1]
@@ -75,7 +231,7 @@ class AIRescueEngine:
             dados = json.loads(raw_json)
 
             questoes_convertidas = []
-            for item in dados.get("questoes", []):
+            for idx, item in enumerate(dados.get("questoes", []), start=1):
                 alts = [
                     AlternativaSchema(
                         letra=str(alt.get("letra", "")).strip().lower().replace(")", "").replace(".", ""),
@@ -83,13 +239,29 @@ class AIRescueEngine:
                     )
                     for alt in item.get("alternativas", [])
                 ]
+
+                tabela_obj = None
+                raw_tabela = item.get("tabela")
+                if isinstance(raw_tabela, dict) and raw_tabela.get("linhas"):
+                    linhas_limpas = [
+                        [str(cel).strip() for cel in linha]
+                        for linha in raw_tabela["linhas"]
+                        if isinstance(linha, list) and any(str(c).strip() for c in linha)
+                    ]
+                    if linhas_limpas:
+                        tabela_obj = TabelaQuestaoSchema(linhas=linhas_limpas)
+
                 questoes_convertidas.append(
                     QuestaoSchema(
-                        numero=item.get("numero", len(questoes_convertidas) + 1),
+                        numero=idx,  # Garante sequência contínua 1, 2, 3... sem pulos
                         enunciado=str(item.get("enunciado", "")).strip(),
+                        tabela=tabela_obj,
                         alternativas=alts,
                     )
                 )
+
+            if not questoes_convertidas:
+                return self._extracao_contingencia_local(texto_bruto_prova)
 
             return ProvaSchema(
                 tipo_avaliacao=str(dados.get("tipo_avaliacao", "mensal")).strip().lower(),
@@ -103,6 +275,6 @@ class AIRescueEngine:
             )
 
         except Exception as e:
-            self.ultimo_erro = str(e)
-            print(f"[AI-Rescue] Erro ao processar resposta do Gemini: {e}")
-            return ProvaSchema(questoes=[])
+            self.ultimo_erro = f"Erro ao interpretar JSON da IA: {e}"
+            print(f"[AI-Rescue] {self.ultimo_erro}")
+            return self._extracao_contingencia_local(texto_bruto_prova)
