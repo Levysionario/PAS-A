@@ -14,25 +14,25 @@ class AIRescueEngine:
         self.ultimo_erro: str | None = None
         self.modelos_fallback = [
             "gemini-3.8-flash",
-            "gemini-3.8-flash-lite",
+            "gemini-3.8-pro",
         ]
 
     def _extracao_contingencia_local(self, texto_bruto: str) -> ProvaSchema:
         """
-        Contingência local apenas se a API do Google estiver fora do ar (503/429).
-        Suporta tanto questões numeradas quanto blocos separados por conjuntos de alternativas (A..E).
+        Contingência local determinística caso a API do Gemini esteja indisponível (503/429).
+        Extrai questões com ou sem numeração, objetivas ou discursivas, e tabelas [TABELA]...[/TABELA].
         """
-        linhas = [l.strip() for l in texto_bruto.splitlines() if l.strip()]
+        linhas_raw = [l.strip() for l in texto_bruto.splitlines() if l.strip()]
 
         disciplina = "DISCIPLINA"
         professor = "PROFESSOR"
         turma = "1º Ano"
         tipo_avaliacao = "mensal"
 
-        for l in linhas[:12]:
+        for l in linhas_raw[:15]:
             l_upper = l.upper()
             if "PROF." in l_upper:
-                m_prof = re.search(r"Prof\.\s*([A-ZÀ-Ú\s]+?)(?:\s+DATA:|$)", l, re.IGNORECASE)
+                m_prof = re.search(r"Prof\.\s*([A-ZÀ-Ú\s]+?)(?:\s+DATA:|\||$)", l, re.IGNORECASE)
                 if m_prof:
                     professor = m_prof.group(1).strip()
             if any(t in l_upper for t in ["1º ANO", "2º ANO", "3º ANO", "6º ANO", "7º ANO", "8º ANO", "9º ANO"]):
@@ -50,39 +50,71 @@ class AIRescueEngine:
                 "HISTÓRIA", "GEOGRAFIA", "PORTUGUÊS", "LÍNGUA PORTUGUESA", "INGLÊS", "ESPANHOL",
                 "FILOSOFIA", "SOCIOLOGIA", "LITERATURA", "REDAÇÃO", "ARTES", "EDUCAÇÃO FÍSICA",
             ]:
-                if disc_nome in l_upper and len(l) <= 40:
-                    disciplina = re.sub(r"NOTA\s*:", "", l, flags=re.IGNORECASE).strip().upper()
+                if disc_nome in l_upper and len(l) <= 45:
+                    limpa = re.sub(r"NOTA\s*:?", "", l, flags=re.IGNORECASE).replace("|", "").strip()
+                    if limpa:
+                        disciplina = limpa.upper()
                     break
 
-        padrao_q_num = re.compile(r"^(?:Quest[ãa]o\s*)?0?(\d{1,2})[\.\)\-–]\s*(.+)$", re.IGNORECASE)
-        padrao_alt = re.compile(r"^([a-eA-E])[\)\.\-]\s*(.+)$")
+        padrao_q_num = re.compile(r"^(?:Quest[ãa]o\s*)?0?(\d{1,2})[\.\)\-–:]\s*(.+)$", re.IGNORECASE)
+        padrao_alt = re.compile(r"^\(?([a-eA-E])[\)\.\-:]\s*(.+)$")
 
         questoes: list[QuestaoSchema] = []
         buffer_enunciado: list[str] = []
         alternativas_atuais: list[AlternativaSchema] = []
+        tabela_atual: TabelaQuestaoSchema | None = None
+        dentro_tabela = False
+        linhas_tabela_temp: list[list[str]] = []
         numero_atual = 1
 
         def _fechar_questao():
-            nonlocal numero_atual, buffer_enunciado, alternativas_atuais
-            if buffer_enunciado:
+            nonlocal numero_atual, buffer_enunciado, alternativas_atuais, tabela_atual
+            if buffer_enunciado or alternativas_atuais:
                 enunc_texto = "\n".join(buffer_enunciado).strip()
-                questoes.append(
-                    QuestaoSchema(
-                        numero=numero_atual,
-                        enunciado=enunc_texto,
-                        alternativas=alternativas_atuais,
+                if enunc_texto:
+                    questoes.append(
+                        QuestaoSchema(
+                            numero=numero_atual,
+                            enunciado=enunc_texto,
+                            tabela=tabela_atual,
+                            alternativas=alternativas_atuais,
+                        )
                     )
-                )
-                numero_atual += 1
+                    numero_atual += 1
             buffer_enunciado = []
             alternativas_atuais = []
+            tabela_atual = None
 
-        for linha in linhas:
-            # Ignora ruídos de cabeçalho antigo
+        for linha in linhas_raw:
+            if linha == "[TABELA]":
+                dentro_tabela = True
+                linhas_tabela_temp = []
+                continue
+            if linha == "[/TABELA]":
+                dentro_tabela = False
+                if linhas_tabela_temp:
+                    tabela_atual = TabelaQuestaoSchema(linhas=linhas_tabela_temp)
+                continue
+            if dentro_tabela:
+                linhas_tabela_temp.append([c.strip() for c in linha.split("|")])
+                continue
+
+            l_upper = linha.upper()
+            # Filtra linhas exclusivas de cabeçalho institucional
             if any(
-                ign in linha.upper()
-                for ign in ["ALUNO (A):", "NÚMERO DE REGISTRO", "GABARITO", "A B C D E", "COLÉGIO SANTO ANTÔNIO"]
+                ign in l_upper
+                for ign in [
+                    "ALUNO (A):",
+                    "ALUNO(A):",
+                    "NÚMERO DE REGISTRO",
+                    "NUMERO DE REGISTRO",
+                    "A B C D E",
+                    "COLÉGIO SANTO ANTÔNIO",
+                    "DATA: ____",
+                ]
             ):
+                continue
+            if re.match(r"^(NOTA\s*:?\s*\|?\s*)+", l_upper) and len(linha) < 50:
                 continue
 
             m_q = padrao_q_num.match(linha)
@@ -96,9 +128,7 @@ class AIRescueEngine:
             m_alt = padrao_alt.match(linha)
             if m_alt:
                 letra = m_alt.group(1).lower()
-                # Se já fechou alternativas (ex: veio 'a)' depois de já ter 'd)' ou 'e)'), começa nova questão sem número
                 if letra == "a" and len(alternativas_atuais) >= 2:
-                    # A última linha do buffer anterior era o enunciado da nova questão
                     novo_enunc = []
                     if buffer_enunciado and len(buffer_enunciado) > 1:
                         novo_enunc = [buffer_enunciado.pop()]
@@ -107,8 +137,7 @@ class AIRescueEngine:
                 alternativas_atuais.append(AlternativaSchema(letra=letra, texto=m_alt.group(2).strip()))
                 continue
 
-            # Se já temos alternativas fechadas (ex: 4 ou 5) e chegou um novo parágrafo longo sem ser alternativa,
-            # é o enunciado de uma nova questão que o professor mandou sem número
+            # Se já coletou pelo menos 4 alternativas (a..d ou a..e) e chegou texto novo, inicia próxima questão sem número
             if len(alternativas_atuais) >= 4:
                 _fechar_questao()
                 buffer_enunciado.append(linha)
@@ -189,6 +218,8 @@ class AIRescueEngine:
         """
 
         response = None
+        erros_coletados = []
+
         for modelo in self.modelos_fallback:
             for tentativa in range(1, 4):
                 try:
@@ -204,7 +235,7 @@ class AIRescueEngine:
                         break
                 except Exception as e:
                     erro_str = str(e)
-                    self.ultimo_erro = erro_str
+                    erros_coletados.append(f"[{modelo} t{tentativa}]: {erro_str}")
                     print(f"[AI-Rescue] Tentativa {tentativa} falhou no modelo {modelo}: {erro_str}")
 
                     if any(cod in erro_str for cod in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"]):
@@ -217,6 +248,7 @@ class AIRescueEngine:
                 break
 
         if not response or not response.text:
+            self.ultimo_erro = " | ".join(erros_coletados) if erros_coletados else "Sem resposta da API Gemini."
             print("[AI-Rescue] API indisponível após retentativas. Usando extrator de contingência local...")
             return self._extracao_contingencia_local(texto_bruto_prova)
 
@@ -253,7 +285,7 @@ class AIRescueEngine:
 
                 questoes_convertidas.append(
                     QuestaoSchema(
-                        numero=idx,  # Garante sequência contínua 1, 2, 3... sem pulos
+                        numero=idx,
                         enunciado=str(item.get("enunciado", "")).strip(),
                         tabela=tabela_obj,
                         alternativas=alts,
@@ -261,6 +293,7 @@ class AIRescueEngine:
                 )
 
             if not questoes_convertidas:
+                self.ultimo_erro = "IA retornou lista de questões vazia."
                 return self._extracao_contingencia_local(texto_bruto_prova)
 
             return ProvaSchema(
