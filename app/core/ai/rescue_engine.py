@@ -10,16 +10,23 @@ from app.schemas.prova import ProvaSchema, QuestaoSchema, AlternativaSchema, Tab
 class AIRescueEngine:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY")
-        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+        self.client = (
+            genai.Client(
+                api_key=self.api_key,
+                http_options=types.HttpOptions(timeout=25_000),
+            )
+            if self.api_key
+            else None
+        )
         self.ultimo_erro: str | None = None
         self.modelos_fallback = [
             "gemini-3.8-flash",
-            "gemini-3.8-pro",
+            "gemini-3.8-flash-lite",
         ]
 
     def _extracao_contingencia_local(self, texto_bruto: str) -> ProvaSchema:
         """
-        Contingência local determinística caso a API do Gemini esteja indisponível (503/429).
+        Contingência local determinística caso a API do Gemini esteja indisponível ou lenta.
         Extrai questões com ou sem numeração, objetivas ou discursivas, e tabelas [TABELA]...[/TABELA].
         """
         linhas_raw = [l.strip() for l in texto_bruto.splitlines() if l.strip()]
@@ -100,7 +107,6 @@ class AIRescueEngine:
                 continue
 
             l_upper = linha.upper()
-            # Filtra linhas exclusivas de cabeçalho institucional
             if any(
                 ign in l_upper
                 for ign in [
@@ -137,7 +143,6 @@ class AIRescueEngine:
                 alternativas_atuais.append(AlternativaSchema(letra=letra, texto=m_alt.group(2).strip()))
                 continue
 
-            # Se já coletou pelo menos 4 alternativas (a..d ou a..e) e chegou texto novo, inicia próxima questão sem número
             if len(alternativas_atuais) >= 4:
                 _fechar_questao()
                 buffer_enunciado.append(linha)
@@ -221,7 +226,7 @@ class AIRescueEngine:
         erros_coletados = []
 
         for modelo in self.modelos_fallback:
-            for tentativa in range(1, 4):
+            for tentativa in range(1, 3):
                 try:
                     response = self.client.models.generate_content(
                         model=modelo,
@@ -239,7 +244,7 @@ class AIRescueEngine:
                     print(f"[AI-Rescue] Tentativa {tentativa} falhou no modelo {modelo}: {erro_str}")
 
                     if any(cod in erro_str for cod in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"]):
-                        time.sleep(2 * tentativa)
+                        time.sleep(1.0)
                         continue
                     else:
                         break
@@ -249,7 +254,7 @@ class AIRescueEngine:
 
         if not response or not response.text:
             self.ultimo_erro = " | ".join(erros_coletados) if erros_coletados else "Sem resposta da API Gemini."
-            print("[AI-Rescue] API indisponível após retentativas. Usando extrator de contingência local...")
+            print("[AI-Rescue] API indisponível ou timeout. Usando extrator de contingência local...")
             return self._extracao_contingencia_local(texto_bruto_prova)
 
         try:

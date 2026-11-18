@@ -65,7 +65,7 @@ def _extrair_conteudo_estruturado_bruto(caminho_arquivo: str) -> str:
 
 
 @router.post("/processar-docx", response_model=ProvaSchema)
-async def processar_documento(file: UploadFile = File(...)):
+def processar_documento(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Formato inválido. Envie um arquivo .docx")
 
@@ -94,7 +94,7 @@ async def processar_documento(file: UploadFile = File(...)):
 
 
 @router.post("/refazer-com-ia", response_model=ProvaSchema)
-async def refazer_com_ia(filename: str = Form(...)):
+def refazer_com_ia(filename: str = Form(...)):
     caminho_arquivo = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(caminho_arquivo):
         raise HTTPException(
